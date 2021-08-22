@@ -77,7 +77,7 @@ unsigned char labelIsValid(char* label) {
     labelLength = strlen(label);
     for(i = 0; i < labelLength; i++) {
         char current = label[i];
-        if(!((current >= 'A' && current <= 'Z') || (current >= 'a' && current <= 'z') || (current >= '1' && current <= '9'))) {
+        if(!((current >= 'A' && current <= 'Z') || (current >= 'a' && current <= 'z') || (current >= '0' && current <= '9'))) {
             return 0;
         }
     }

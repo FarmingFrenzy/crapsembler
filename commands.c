@@ -5,6 +5,7 @@
 
 
 unsigned char getOpcodeFromName(char* name) {
+			printf("getting opcode from name %s\n", name);
 	if(strcmp("add", name) == 0) {
 		return 0;
 	}
@@ -83,7 +84,7 @@ unsigned char getOpcodeFromName(char* name) {
 	if(strcmp("call", name) == 0) {
 		return 32;
 	}
-	if(strcmp("stop", name) == 0) {
+	if(strcmp("stop", name) == 0 || strcmp("stop\n", name) == 0) {
 		return 63;
 	}
 	return 64;
@@ -186,7 +187,7 @@ unsigned char getTypeFromName(char* name) {
 	if(strcmp("call", name) == 0) {
 		return TYPEJ;
 	}
-	if(strcmp("stop", name) == 0) {
+	if(strcmp("stop", name) == 0 || strcmp("stop\n", name) == 0) {
 		return TYPEJ;
 	}
 
@@ -219,6 +220,5 @@ unsigned char getFunctFromName(char* name) {
 	if(strcmp("mvlo", name) == 0) {
 		return 3;
 	}
-	printf("Unknown operation or funct not applicable:%s\n", name);
 	return 10;
 }

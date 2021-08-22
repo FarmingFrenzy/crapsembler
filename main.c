@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#include <math.h>
 #include "symboltable.h"
 #include "commands.h"
 #include "binaryoperations.h"
@@ -14,21 +16,40 @@
 #define STATE_DATA 2
 #define STATE_CODE 3
 
-
 unsigned char onlyWhitespace(char*);
 unsigned char interpertLine(char*);
 unsigned char isDataAllocation(char*);
 unsigned char isNumber(char*);
 unsigned char allocateData(int, char**, int);
 void splitString(char*, char*, char***, int*);
+int makeR(int, int, int, int, int);
+int makeI(int, int, int, short);
+int makeJ(int, int, int);
+int getRegisterNumber(char*);
 
-int state = STATE_READING;
 Symboltable* symboltable = NULL;
 char* dataImage = NULL;
 int* instructionImage = NULL;
+int state = STATE_READING;
 int IC = 100;
 int DC = 0;
 int lineNumber = 0;
+
+void printBits(size_t const size, void const * const ptr)
+{
+    unsigned char *b = (unsigned char*) ptr;
+    unsigned char byte;
+    int i, j;
+
+    for (i = size-1; i >= 0; i--) {
+        for (j = 7; j >= 0; j--) {
+            byte = (b[i] >> j) & 1;
+            printf("%u", byte);
+        }
+    }
+    puts("");
+}
+
 
 int main(int argc, char* argv[]) {
 	FILE* inputFile;
@@ -43,6 +64,7 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	fclose(inputFile);
+	printf("fin:%d\n", instructionImage[0]);
 	printSymboltable(symboltable);
 	return 0;
 }
@@ -60,6 +82,13 @@ unsigned char interpertLine(char* line) {
 	int splitAtSpaceLength = 0;
 	char* labelName = NULL;
 	int dataType = 0;
+	int opCode = 64;
+	int funct = 0;
+	int type = 0;
+	int rs = 0;
+	int rt = 0;
+	int rd = 0;
+	short immed = 0;
 	/*Check if line is a comment*/
 	if(line[0] == ';') {
 		return 0;
@@ -68,6 +97,7 @@ unsigned char interpertLine(char* line) {
 	if(onlyWhitespace(line)) {
 		return 1;
 	}
+	printf("reading line %s", line);
 	splitString(line, " ", &splitAtSpace, &splitAtSpaceLength);
 	if(state == STATE_READING) {
 		/*TODO: trim input*/
@@ -76,7 +106,10 @@ unsigned char interpertLine(char* line) {
 				dataType = isDataAllocation(splitAtSpace[0]);
 				state =  STATE_DATA;
 			}
-			if(splitAtSpace[0][strlen(splitAtSpace[0])-1] == ':') {
+			else if(getOpcodeFromName(splitAtSpace[0]) != 64) {
+				/*TODO: finish this*/
+			}
+			else if(splitAtSpace[0][strlen(splitAtSpace[0])-1] == ':') {
 				/*TODO: make a function of this*/
 				labelName = (char*)calloc(strlen(splitAtSpace[0])-1, sizeof(char));
 				/*TODO: check for errors*/
@@ -98,6 +131,8 @@ unsigned char interpertLine(char* line) {
 					return 101;
 				}
 				dataType = isDataAllocation(splitAtSpace[1]);
+				opCode = getOpcodeFromName(splitAtSpace[1]);
+				printf("opcode:%d\n", opCode);
 				if(dataType) {
 					Symboltable* sym;
 					initSymbol(&sym);
@@ -107,7 +142,7 @@ unsigned char interpertLine(char* line) {
 					appendSymbol(&symboltable, sym);
 					state = STATE_DATA;
 				}
-				if(getOpcodeFromName(splitAtSpace[1]) != 64) {
+				else if(opCode != 64) {
 					Symboltable* sym;
 					initSymbol(&sym);
 					setName(sym, labelName);
@@ -131,6 +166,73 @@ unsigned char interpertLine(char* line) {
 			return 2;
 		}
 		if(state == STATE_CODE) {
+			if(opCode != 64) {
+
+				type = getTypeFromName(splitAtSpace[1]);
+				funct = getFunctFromName(splitAtSpace[1]);
+				splitString(splitAtSpace[2], ",", &splitAtComma, &splitAtCommaLength);
+				/*int makeR(int opcode, int rs, int rt, int rd, int funct)*/
+				if(type == TYPER) {
+					if(opCode == 0) {
+						printf("opcode is zero yay\n");
+						rs = getRegisterNumber(splitAtComma[0]);
+						rt = getRegisterNumber(splitAtComma[1]);
+						rd = getRegisterNumber(splitAtComma[2]);
+						appendToInstructions(&instructionImage, makeR(opCode, rs, rt, rd, funct), &IC);
+					}
+					else {
+						rs = getRegisterNumber(splitAtComma[1]);
+						rd = getRegisterNumber(splitAtComma[0]);
+						appendToInstructions(&instructionImage, makeR(opCode, rs, 0, rd, funct), &IC);
+					}
+				}
+				/*int makeI(int opcode, int rs, int rt, int immed)*/
+				else if(type == TYPEI) {
+					if(opCode >= 10 && opCode <= 14) {
+						if(!isNumber(splitAtComma[1])) {
+							printf("Error at line %d, immed not a number\n", lineNumber);
+							return 101;
+						}
+						rs = getRegisterNumber(splitAtComma[0]);
+						immed = (short)atoi(splitAtComma[1]);
+						rt = getRegisterNumber(splitAtComma[2]);
+						appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
+					}
+					else if(opCode >= 15 && opCode <= 17) {
+						printf("15\n");
+						rs = getRegisterNumber(splitAtComma[0]);
+						immed = 0;
+						rt = getRegisterNumber(splitAtComma[1]);
+						appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
+					}
+					else {
+						if(!isNumber(splitAtComma[1])) {
+							printf("Error at line %d, immed not a number\n", lineNumber);
+							return 101;
+						}
+						rs = getRegisterNumber(splitAtComma[0]);
+						immed = (short)atoi(splitAtComma[1]);
+						rt = getRegisterNumber(splitAtComma[2]);
+						appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
+					}
+				}
+				/*int makeJ(int opcode, int reg, int address)*/
+				else if(type == TYPEJ) {
+
+					if(opCode == 30) {
+						if(splitAtComma[0][0] == '$') {
+							appendToInstructions(&instructionImage, makeJ(opCode, 1, getRegisterNumber(splitAtComma[0])), &IC);
+						}
+						else {
+							appendToInstructions(&instructionImage, makeJ(opCode, 0, 0), &IC);
+						}
+					}
+					else if(opCode == 31 || opCode == 32 || opCode == 63) {
+
+						appendToInstructions(&instructionImage, makeJ(opCode, 0, 0), &IC);
+					}
+				}
+			}
 			state = STATE_READING;
 		}
 	}
@@ -163,7 +265,6 @@ unsigned char allocateData(int dataType, char** dataList, int dataListLength) {
 				return 1;
 			}
 			value = atoi(dataList[i]);
-			printf("got value %d from %s\n", value, dataList[i]);
 			splitValue[0] =  value & 0x000000FF;
 			splitValue[1] = (value & 0x0000FF00) >> 8;
 			splitValue[2] = (value & 0x00FF0000) >> 16;
@@ -184,7 +285,6 @@ unsigned char allocateData(int dataType, char** dataList, int dataListLength) {
 				return 1;
 			}
 			value = atoi(dataList[i]);
-			printf("got value %d from %s\n", value, dataList[i]);
 			splitValue[0] =  value & 0x000000FF;
 			splitValue[1] = (value & 0x0000FF00) >> 8;
 			for(j = 0; j < 2; j++) {
@@ -219,6 +319,7 @@ unsigned char allocateData(int dataType, char** dataList, int dataListLength) {
 unsigned char isNumber(char* str) {
 	int i;
 	int stringlength = strlen(str);
+
 	for(i = 0; i < stringlength; i++) {
 		if(i == stringlength - 1 && str[i] == '\n') {
 			continue;
@@ -286,4 +387,68 @@ unsigned char isDataAllocation(char* word) {
 		return 4;
 	}
 	return 0;
+}
+
+/*
+*31-26: opcode
+*25-21: rs
+*20-16: rt
+*15-11: rd
+*10-6:  funct
+*5-0:   N/A
+*/
+int makeR(int opcode, int rs, int rt, int rd, int funct) {
+	int res = 0;
+	printf("rs:%d\nrt:%d\nrd:%d\nopcode:%d\nfunct%d\n", rs, rt, rd, opcode, funct);
+	if((rs < 0 || rs > 31) || (rt < 0 || rt > 31) || (rd < 0 || rd > 31)) {
+		printf("Error in line %d, register number invalid\n", lineNumber);
+		return 0xFFFFFFFF;
+	}
+	res = res | (funct << 6);
+	res = res | (rd << 11);
+	res = res | (rt << 16);
+	res = res | (rs << 21);
+	res = res | (opcode << 26);
+	return res;
+}
+
+int makeI(int opcode, int rs, int rt, short immed) {
+	int res = 0;
+	if((rs < 0 || rs > 31) || (rt < 0 || rt > 31)) {
+		printf("Error in line %d, register number invalid\n", lineNumber);
+		return 0xFFFFFFFF;
+	}
+	if(immed > SHRT_MAX || immed < SHRT_MIN) {
+		printf("Error in line %d\n, value too large or too small\n", lineNumber);
+	}
+	res = res | immed;
+	res = res & 0x0000FFFF;
+	res = res | (rt << 16);
+	res = res | (rs << 21);
+	res = res | (opcode << 26);
+	return res;
+}
+
+int makeJ(int opcode, int reg, int address) {
+	int res = 0;
+	if(address < 0 || address > pow(2,25)-1) {
+		printf("Error in line %d, address value too large or too small\n", lineNumber);
+	}
+	res = res | address;
+	res = res | (reg << 25);
+	res = res | (opcode << 26);
+	return res;
+}
+
+int getRegisterNumber(char* str) {
+	char buffer[2];
+	int index = 0;
+	int i = 0;
+	int strlength = strlen(str);
+	for(i = 0; i < strlength; i++) {
+		if(str[i] >= '0' && str[i] <= '9') {
+			buffer[index++] = str[i];
+		}
+	}
+	return atoi(buffer);
 }
