@@ -21,6 +21,8 @@ void printbits(size_t const size, void const * const ptr)
 unsigned char appendToData(char** data, char newdata, int* DC) {
 	char* temp;
 	temp = (char*)realloc(*data, ((*DC) + 1)*sizeof(char));
+    printf("appending:");
+    printbits(sizeof(char), &newdata);
 	if(temp) {
 		*data = temp;
 		(*data)[*DC] = newdata;
@@ -34,7 +36,7 @@ unsigned char appendToData(char** data, char newdata, int* DC) {
 unsigned char appendToInstructions(int** instructions, int newinstruction, int* IC) {
 	int size;
     int* temp;
-    printf("appending:\n");
+    printf("appending:");
     printbits(sizeof(int), &newinstruction);
 	size = INDEXFROMIC(*IC);
 	temp = (int*)realloc(*instructions, sizeof(int)*(size+1));

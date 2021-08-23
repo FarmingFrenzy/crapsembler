@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,11 +22,14 @@ unsigned char interpertLine(char*);
 unsigned char isDataAllocation(char*);
 unsigned char isNumber(char*);
 unsigned char allocateData(int, char**, int);
+unsigned char writeInstruction(char**, int, int, int);
+unsigned char addExtern(char*);
 void splitString(char*, char*, char***, int*);
 int makeR(int, int, int, int, int);
 int makeI(int, int, int, short);
 int makeJ(int, int, int);
 int getRegisterNumber(char*);
+char* firstInstanceOf(char*, char);
 
 Symboltable* symboltable = NULL;
 char* dataImage = NULL;
@@ -64,9 +68,12 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	fclose(inputFile);
-	printf("fin:%d\n", instructionImage[0]);
 	printSymboltable(symboltable);
-	return 0;
+    FILE* new = fopen("output.o", "w");
+    fwrite(instructionImage, sizeof(int), INDEXFROMIC(IC), new);
+    fwrite(dataImage, sizeof(char), DC, new);
+    fclose(new);
+    return 0;
 }
 
 /*
@@ -81,14 +88,11 @@ unsigned char interpertLine(char* line) {
 	int splitAtCommaLength = 0;
 	int splitAtSpaceLength = 0;
 	char* labelName = NULL;
+    char* originalLine;
 	int dataType = 0;
 	int opCode = 64;
-	int funct = 0;
-	int type = 0;
-	int rs = 0;
-	int rt = 0;
-	int rd = 0;
-	short immed = 0;
+    int type = 0;
+    int funct;
 	/*Check if line is a comment*/
 	if(line[0] == ';') {
 		return 0;
@@ -97,18 +101,24 @@ unsigned char interpertLine(char* line) {
 	if(onlyWhitespace(line)) {
 		return 1;
 	}
+    originalLine = (char*)calloc(strlen(line), sizeof(char));
+    strcpy(originalLine, line);
 	printf("reading line %s", line);
 	splitString(line, " ", &splitAtSpace, &splitAtSpaceLength);
 	if(state == STATE_READING) {
 		/*TODO: trim input*/
 		if(splitAtSpaceLength > 0) {
-			if(isDataAllocation(splitAtSpace[0])) {
+            if(strcmp(".extern", splitAtSpace[0]) == 0) {
+                addExtern(splitAtSpace[1]);
+            }
+			else if(isDataAllocation(splitAtSpace[0])) {
 				dataType = isDataAllocation(splitAtSpace[0]);
 				state =  STATE_DATA;
 			}
-			else if(getOpcodeFromName(splitAtSpace[0]) != 64) {
-				/*TODO: finish this*/
-			}
+            else if(getOpcodeFromName(splitAtSpace[0]) != 64) {
+                opCode = getOpcodeFromName(splitAtSpace[0]);
+                state = STATE_CODE;
+            }
 			else if(splitAtSpace[0][strlen(splitAtSpace[0])-1] == ':') {
 				/*TODO: make a function of this*/
 				labelName = (char*)calloc(strlen(splitAtSpace[0])-1, sizeof(char));
@@ -132,7 +142,6 @@ unsigned char interpertLine(char* line) {
 				}
 				dataType = isDataAllocation(splitAtSpace[1]);
 				opCode = getOpcodeFromName(splitAtSpace[1]);
-				printf("opcode:%d\n", opCode);
 				if(dataType) {
 					Symboltable* sym;
 					initSymbol(&sym);
@@ -155,84 +164,42 @@ unsigned char interpertLine(char* line) {
 		}
 		if(state == STATE_DATA) {
 			if(labelName) {
-				splitString(splitAtSpace[2], ",", &splitAtComma, &splitAtCommaLength);
-				allocateData(dataType, splitAtComma, splitAtCommaLength);
+                if(dataType != 4) {
+                    splitString(splitAtSpace[2], ",", &splitAtComma, &splitAtCommaLength);
+    				allocateData(dataType, splitAtComma, splitAtCommaLength);
+                }
+                else {
+                    char* firstQuote;
+                    firstQuote = firstInstanceOf(originalLine, '\"');
+                    allocateData(dataType, &firstQuote, 1);
+                }
 			}
 			else {
-				splitString(splitAtSpace[1], ",", &splitAtComma, &splitAtCommaLength);
-				allocateData(dataType, splitAtComma, splitAtCommaLength);
+                if(dataType != 4) {
+                    splitString(splitAtSpace[1], ",", &splitAtComma, &splitAtCommaLength);
+    				allocateData(dataType, splitAtComma, splitAtCommaLength);
+                }
+                else {
+                    char* firstQuote;
+                    firstQuote = firstInstanceOf(originalLine, '\"');
+                    allocateData(dataType, &firstQuote, 1);
+                }
 			}
 			state = STATE_READING;
 			return 2;
 		}
 		if(state == STATE_CODE) {
-			if(opCode != 64) {
-
+			if(labelName) {
 				type = getTypeFromName(splitAtSpace[1]);
 				funct = getFunctFromName(splitAtSpace[1]);
 				splitString(splitAtSpace[2], ",", &splitAtComma, &splitAtCommaLength);
-				/*int makeR(int opcode, int rs, int rt, int rd, int funct)*/
-				if(type == TYPER) {
-					if(opCode == 0) {
-						printf("opcode is zero yay\n");
-						rs = getRegisterNumber(splitAtComma[0]);
-						rt = getRegisterNumber(splitAtComma[1]);
-						rd = getRegisterNumber(splitAtComma[2]);
-						appendToInstructions(&instructionImage, makeR(opCode, rs, rt, rd, funct), &IC);
-					}
-					else {
-						rs = getRegisterNumber(splitAtComma[1]);
-						rd = getRegisterNumber(splitAtComma[0]);
-						appendToInstructions(&instructionImage, makeR(opCode, rs, 0, rd, funct), &IC);
-					}
-				}
-				/*int makeI(int opcode, int rs, int rt, int immed)*/
-				else if(type == TYPEI) {
-					if(opCode >= 10 && opCode <= 14) {
-						if(!isNumber(splitAtComma[1])) {
-							printf("Error at line %d, immed not a number\n", lineNumber);
-							return 101;
-						}
-						rs = getRegisterNumber(splitAtComma[0]);
-						immed = (short)atoi(splitAtComma[1]);
-						rt = getRegisterNumber(splitAtComma[2]);
-						appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
-					}
-					else if(opCode >= 15 && opCode <= 17) {
-						printf("15\n");
-						rs = getRegisterNumber(splitAtComma[0]);
-						immed = 0;
-						rt = getRegisterNumber(splitAtComma[1]);
-						appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
-					}
-					else {
-						if(!isNumber(splitAtComma[1])) {
-							printf("Error at line %d, immed not a number\n", lineNumber);
-							return 101;
-						}
-						rs = getRegisterNumber(splitAtComma[0]);
-						immed = (short)atoi(splitAtComma[1]);
-						rt = getRegisterNumber(splitAtComma[2]);
-						appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
-					}
-				}
-				/*int makeJ(int opcode, int reg, int address)*/
-				else if(type == TYPEJ) {
-
-					if(opCode == 30) {
-						if(splitAtComma[0][0] == '$') {
-							appendToInstructions(&instructionImage, makeJ(opCode, 1, getRegisterNumber(splitAtComma[0])), &IC);
-						}
-						else {
-							appendToInstructions(&instructionImage, makeJ(opCode, 0, 0), &IC);
-						}
-					}
-					else if(opCode == 31 || opCode == 32 || opCode == 63) {
-
-						appendToInstructions(&instructionImage, makeJ(opCode, 0, 0), &IC);
-					}
-				}
 			}
+            else {
+                type = getTypeFromName(splitAtSpace[0]);
+                funct = getFunctFromName(splitAtSpace[0]);
+                splitString(splitAtSpace[1], ",", &splitAtComma, &splitAtCommaLength);
+            }
+            writeInstruction(splitAtComma, opCode, type, funct);
 			state = STATE_READING;
 		}
 	}
@@ -288,7 +255,6 @@ unsigned char allocateData(int dataType, char** dataList, int dataListLength) {
 			splitValue[0] =  value & 0x000000FF;
 			splitValue[1] = (value & 0x0000FF00) >> 8;
 			for(j = 0; j < 2; j++) {
-				/*printf("writing %d from dh \n", splitValue[j]);*/
 				if((ret = appendToData(&dataImage, splitValue[j], &DC)) == 1) {
 					printf("Memory allocation failure %s in line %d\n", dataList[i], lineNumber);
 					return 1;
@@ -312,6 +278,7 @@ unsigned char allocateData(int dataType, char** dataList, int dataListLength) {
 			printf("Memory allocation failure %s in line %d\n", dataList[0], lineNumber);
 			return 1;
 		}
+
 	}
 	return 0;
 }
@@ -328,7 +295,6 @@ unsigned char isNumber(char* str) {
 			if((str[i] >= '0' && str[i] <= '9') || (str[i] == '-')) {
 				continue;
 			}
-			printf("here\n");
 			return 0;
 		}
 		if((str[i] >= '0' && str[i] <= '9')) {
@@ -399,7 +365,6 @@ unsigned char isDataAllocation(char* word) {
 */
 int makeR(int opcode, int rs, int rt, int rd, int funct) {
 	int res = 0;
-	printf("rs:%d\nrt:%d\nrd:%d\nopcode:%d\nfunct%d\n", rs, rt, rd, opcode, funct);
 	if((rs < 0 || rs > 31) || (rt < 0 || rt > 31) || (rd < 0 || rd > 31)) {
 		printf("Error in line %d, register number invalid\n", lineNumber);
 		return 0xFFFFFFFF;
@@ -451,4 +416,91 @@ int getRegisterNumber(char* str) {
 		}
 	}
 	return atoi(buffer);
+}
+
+char* firstInstanceOf(char* str, char c) {
+    int i = 0;
+    int strlength = strlen(str);
+    for(i = 0; i < strlength; i++) {
+        if(str[i] == c) {
+            return &str[i];
+        }
+    }
+    return NULL;
+}
+
+unsigned char writeInstruction(char** splitAtComma, int opCode, int type, int funct) {
+    int rs;
+    int rd;
+    int rt;
+    int immed;
+    if(type == TYPER) {
+        if(opCode == 0) {
+            rs = getRegisterNumber(splitAtComma[0]);
+            rt = getRegisterNumber(splitAtComma[1]);
+            rd = getRegisterNumber(splitAtComma[2]);
+            appendToInstructions(&instructionImage, makeR(opCode, rs, rt, rd, funct), &IC);
+        }
+        else {
+            rs = getRegisterNumber(splitAtComma[1]);
+            rd = getRegisterNumber(splitAtComma[0]);
+            appendToInstructions(&instructionImage, makeR(opCode, rs, 0, rd, funct), &IC);
+        }
+    }
+    /*int makeI(int opcode, int rs, int rt, int immed)*/
+    else if(type == TYPEI) {
+        if(opCode >= 10 && opCode <= 14) {
+            if(!isNumber(splitAtComma[1])) {
+                printf("Error at line %d, immed not a number\n", lineNumber);
+                return 101;
+            }
+            rs = getRegisterNumber(splitAtComma[0]);
+            immed = (short)atoi(splitAtComma[1]);
+            rt = getRegisterNumber(splitAtComma[2]);
+            appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
+        }
+        else if(opCode >= 15 && opCode <= 17) {
+            rs = getRegisterNumber(splitAtComma[0]);
+            immed = 0;
+            rt = getRegisterNumber(splitAtComma[1]);
+            appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
+        }
+        else {
+            rs = getRegisterNumber(splitAtComma[0]);
+            immed = 0;
+            rt = getRegisterNumber(splitAtComma[2]);
+            appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
+        }
+    }
+    /*int makeJ(int opcode, int reg, int address)*/
+    else if(type == TYPEJ) {
+        if(opCode == 30) {
+            if(splitAtComma[0][0] == '$') {
+                appendToInstructions(&instructionImage, makeJ(opCode, 1, getRegisterNumber(splitAtComma[0])), &IC);
+            }
+            else {
+                appendToInstructions(&instructionImage, makeJ(opCode, 0, 0), &IC);
+            }
+        }
+        else if(opCode == 31 || opCode == 32 || opCode == 63) {
+            appendToInstructions(&instructionImage, makeJ(opCode, 0, 0), &IC);
+        }
+    }
+    return 0;
+}
+
+unsigned char addExtern(char* name) {
+    Symboltable* sym;
+    int i;
+    int nameLength = strlen(name);
+    char* trimmedName = (char*)calloc(nameLength-1, sizeof(char));
+    for(i = 0; i < nameLength-1; i++) {
+        trimmedName[i] = name[i];
+    }
+    initSymbol(&sym);
+    setName(sym, trimmedName);
+    setAddress(sym, 0);
+    addAttribute(sym, ATTR_EXTERN);
+    appendSymbol(&symboltable, sym);
+    return 0;
 }

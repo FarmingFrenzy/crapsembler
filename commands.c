@@ -5,7 +5,6 @@
 
 
 unsigned char getOpcodeFromName(char* name) {
-			printf("getting opcode from name %s\n", name);
 	if(strcmp("add", name) == 0) {
 		return 0;
 	}
@@ -190,8 +189,6 @@ unsigned char getTypeFromName(char* name) {
 	if(strcmp("stop", name) == 0 || strcmp("stop\n", name) == 0) {
 		return TYPEJ;
 	}
-
-	printf("Unknown operation: %s\n", name);
 	return TYPEERROR;
 }
 
