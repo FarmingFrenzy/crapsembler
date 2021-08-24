@@ -44,10 +44,10 @@ unsigned char addAttribute(Symboltable* symbol, int attribute) {
     return 1;
 }
 
-unsigned char hasAttribute(Symboltable* symbol, int attribute) {
+unsigned char hasAttribute(Symboltable* sym, int attr) {
     int i;
-    for(i=0; i < symbol->attributeCount; i++) {
-        if(symbol->attributes[i] == attribute) {
+    for(i = 0; i < sym->attributeCount; i++) {
+        if(attr == sym->attributes[i]) {
             return 1;
         }
     }
@@ -64,6 +64,25 @@ unsigned char labelExists(Symboltable* symbol, char* label) {
     }
     return 0;
 }
+
+Symboltable* getSymbol(Symboltable* symbol, char* label) {
+    Symboltable* current = symbol;
+    char* name;
+    if(label[strlen(label)-1] == '\n'){
+        name = (char*)calloc(strlen(label)-1, sizeof(char));
+        memcpy(name, label, strlen(label)-1);
+        label = name;
+    }
+    printf("llooking for %s\n", label);
+    while(current != NULL) {
+        if(strcmp(current->name, label) == 0) {
+            return current;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
+
 
 void appendSymbol(Symboltable** head, Symboltable* new) {
     Symboltable** last = getLastSymbol(head);
@@ -88,7 +107,12 @@ void printSymboltable(Symboltable* head) {
     if(head != NULL) {
         printf("Symbol %s:\n", head->name);
         printf("\taddress: %d\n", head->address);
-        printf("\tattribute %d\n", head->attributes[0]);
+        if(head->attributeCount > 0) {
+            printf("\tattribute %d\n", head->attributes[0]);
+        }
+        if(head->attributeCount > 1) {
+            printf("\tattribute %d\n", head->attributes[1]);
+        }
         printSymboltable(head->next);
     }
 }

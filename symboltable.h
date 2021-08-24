@@ -17,6 +17,7 @@ unsigned char setAddress(Symboltable*, int);
 unsigned char hasAttribute(Symboltable*, int);
 unsigned char labelIsValid(char*);
 Symboltable** getLastSymbol(Symboltable**);
+Symboltable* getSymbol(Symboltable*, char*);
 void setName(Symboltable*, char*);
 void initSymbol(Symboltable**);
 void appendSymbol(Symboltable**, Symboltable*);

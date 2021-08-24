@@ -2,3 +2,4 @@
 
 unsigned char appendToData(char**, char, int*);
 unsigned char appendToInstructions(int**, int, int*);
+int hasReg(int);

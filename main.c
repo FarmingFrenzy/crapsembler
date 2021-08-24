@@ -18,13 +18,15 @@
 #define STATE_CODE 3
 
 unsigned char onlyWhitespace(char*);
+unsigned char interpertLineSecond(char*);
 unsigned char interpertLine(char*);
 unsigned char isDataAllocation(char*);
 unsigned char isNumber(char*);
 unsigned char allocateData(int, char**, int);
 unsigned char writeInstruction(char**, int, int, int);
-unsigned char addExtern(char*);
+unsigned char addExtern(Symboltable**, char* , int);
 void splitString(char*, char*, char***, int*);
+void addICF();
 int makeR(int, int, int, int, int);
 int makeI(int, int, int, short);
 int makeJ(int, int, int);
@@ -32,11 +34,14 @@ int getRegisterNumber(char*);
 char* firstInstanceOf(char*, char);
 
 Symboltable* symboltable = NULL;
+Symboltable* externalList = NULL;
 char* dataImage = NULL;
 int* instructionImage = NULL;
 int state = STATE_READING;
 int IC = 100;
 int DC = 0;
+int ICF = 0;
+int DCF = 0;
 int lineNumber = 0;
 
 void printBits(size_t const size, void const * const ptr)
@@ -67,12 +72,130 @@ int main(int argc, char* argv[]) {
 			return 101;
 		}
 	}
+    addICF();
+    /*Second pass*/
+    printf("*******SECOND PASS********\n");
+    ICF = IC;
+    DCF = DC;
+    IC = 100;
+    DC = 0;
+    state = STATE_READING;
+    rewind(inputFile);
+    while((line_buffer_size = getline(&line_buffer, &line_buffer_size, inputFile)) != -1) {
+		lineNumber++;
+		if(interpertLineSecond(line_buffer) == 101) {
+			return 101;
+		}
+	}
+    /*DONEZO*/
 	fclose(inputFile);
 	printSymboltable(symboltable);
-    FILE* new = fopen("output.o", "w");
-    fwrite(instructionImage, sizeof(int), INDEXFROMIC(IC), new);
-    fwrite(dataImage, sizeof(char), DC, new);
-    fclose(new);
+    printf("Externals:\n");
+    printSymboltable(externalList);
+    printf("done\n");
+    return 0;
+}
+
+unsigned char interpertLineSecond(char* line) {
+    char* originalLine;
+    char* symbolname;
+    char** splitAtSpace;
+    char** splitAtComma;
+    int splitAtSpaceLength;
+    int splitAtCommaLength;
+    int opCode;
+    int type;
+    short diff;
+    Symboltable* sym;
+    /*Check if line is a comment*/
+    if(line[0] == ';') {
+        return 0;
+    }
+    /*Check if line is only whitespace*/
+    if(onlyWhitespace(line)) {
+        return 1;
+    }
+    printf("reading line %s", line);
+    originalLine = (char*)calloc(strlen(line), sizeof(char));
+    strcpy(originalLine, line);
+    splitString(line, " ", &splitAtSpace, &splitAtSpaceLength);
+    if(!(splitAtSpaceLength > 0)) {
+        return 101;
+    }
+    if(strcmp(splitAtSpace[0], ".entry") == 0) {
+        sym = getSymbol(symboltable, splitAtSpace[1]);
+        if(!sym) {
+            printf("Error on line %d, symbol %s doesn't exist\n", lineNumber, splitAtSpace[1]);
+            return 1;
+        }
+        addAttribute(sym, ATTR_ENTRY);
+    }
+    else if((opCode = getOpcodeFromName(splitAtSpace[0])) != 64) {
+        type = getTypeFromName(splitAtSpace[0]);
+        state = STATE_CODE;
+    }
+    else if(splitAtSpaceLength > 2 && (opCode = getOpcodeFromName(splitAtSpace[1])) != 64) {
+        type = getTypeFromName(splitAtSpace[1]);
+        state = STATE_CODE;
+    }
+    if(state == STATE_CODE) {
+        if(type == TYPEJ && opCode != 63 && !hasReg(instructionImage[INDEXFROMIC(IC)])) {
+            if(splitAtSpaceLength > 2) {
+                symbolname = splitAtSpace[2];
+            }
+            else {
+                symbolname = splitAtSpace[1];
+            }
+            if(symbolname[strlen(symbolname)-1] == '\n'){
+                char* name;
+                name = (char*)calloc(strlen(symbolname)-1, sizeof(char));
+                memcpy(name, symbolname, strlen(symbolname)-1);
+                symbolname = name;
+            }
+            sym = getSymbol(symboltable, symbolname);
+            if(sym == NULL) {
+                printf("Error on line %d, symbol doesn't exist %s", lineNumber, symbolname);
+                return 101;
+            }
+            if(hasAttribute(sym, ATTR_EXTERN)) {
+                if(addExtern(&externalList, symbolname, IC) > 0) {
+                    return 101;
+                }
+            }
+            else {
+                instructionImage[INDEXFROMIC(IC)] = instructionImage[INDEXFROMIC(IC)] | sym->address;
+                printf("new:\t  ");
+                printBits(sizeof(int), &instructionImage[INDEXFROMIC(IC)]);
+            }
+        }
+        else if(opCode >= 15 && opCode <= 18) {
+            if(splitAtSpaceLength > 2) {
+                symbolname = splitAtSpace[2];
+            }
+            else {
+                symbolname = splitAtSpace[1];
+            }
+            if(symbolname[strlen(symbolname)-1] == '\n'){
+                char* name;
+                name = (char*)calloc(strlen(symbolname)-1, sizeof(char));
+                memcpy(name, symbolname, strlen(symbolname)-1);
+                symbolname = name;
+            }
+            splitString(symbolname, ",", &splitAtComma, &splitAtCommaLength);
+            symbolname = splitAtComma[2];
+            sym = getSymbol(symboltable, symbolname);
+            if(!sym) {
+                printf("Error on line %d, symbol doesn't exist %s", lineNumber, symbolname);
+                return 101;
+            }
+            diff = sym->address - IC;
+            instructionImage[INDEXFROMIC(IC)] = instructionImage[INDEXFROMIC(IC)] | (diff & 0x0000FFFF);
+            printf("new:\t  ");
+            printBits(sizeof(int), &instructionImage[INDEXFROMIC(IC)]);
+        }
+        IC+=4;
+        state = STATE_READING;
+    }
     return 0;
 }
 
@@ -109,7 +232,9 @@ unsigned char interpertLine(char* line) {
 		/*TODO: trim input*/
 		if(splitAtSpaceLength > 0) {
             if(strcmp(".extern", splitAtSpace[0]) == 0) {
-                addExtern(splitAtSpace[1]);
+                if(addExtern(&symboltable, splitAtSpace[1], 0) > 0) {
+                    return 101;
+                }
             }
 			else if(isDataAllocation(splitAtSpace[0])) {
 				dataType = isDataAllocation(splitAtSpace[0]);
@@ -143,21 +268,33 @@ unsigned char interpertLine(char* line) {
 				dataType = isDataAllocation(splitAtSpace[1]);
 				opCode = getOpcodeFromName(splitAtSpace[1]);
 				if(dataType) {
-					Symboltable* sym;
-					initSymbol(&sym);
-					setName(sym, labelName);
-					setAddress(sym, DC);
-					addAttribute(sym, ATTR_DATA);
-					appendSymbol(&symboltable, sym);
+                    if(getSymbol(symboltable, labelName) == NULL) {
+                        Symboltable* sym;
+					    initSymbol(&sym);
+                        setName(sym, labelName);
+                        setAddress(sym, DC);
+                        addAttribute(sym, ATTR_DATA);
+                        appendSymbol(&symboltable, sym);
+                    }
+                    else {
+                        Symboltable* sym = getSymbol(symboltable, labelName);
+                        addAttribute(sym, ATTR_DATA);
+                    }
 					state = STATE_DATA;
 				}
 				else if(opCode != 64) {
-					Symboltable* sym;
-					initSymbol(&sym);
-					setName(sym, labelName);
-					setAddress(sym, IC);
-					addAttribute(sym, ATTR_CODE);
-					appendSymbol(&symboltable, sym);
+                    if(getSymbol(symboltable, labelName) == NULL) {
+                        Symboltable* sym;
+					    initSymbol(&sym);
+					    setName(sym, labelName);
+					    setAddress(sym, IC);
+					    addAttribute(sym, ATTR_CODE);
+					    appendSymbol(&symboltable, sym);
+                    }
+                    else {
+                        Symboltable* sym = getSymbol(symboltable, labelName);
+                        addAttribute(sym, ATTR_CODE);
+                    }
 					state = STATE_CODE;
 				}
 			}
@@ -459,15 +596,19 @@ unsigned char writeInstruction(char** splitAtComma, int opCode, int type, int fu
             rt = getRegisterNumber(splitAtComma[2]);
             appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
         }
-        else if(opCode >= 15 && opCode <= 17) {
+        else if(opCode >= 15 && opCode <= 18) {
             rs = getRegisterNumber(splitAtComma[0]);
             immed = 0;
             rt = getRegisterNumber(splitAtComma[1]);
             appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
         }
         else {
+            if(!isNumber(splitAtComma[1])) {
+                printf("Error at line %d, immed not a number\n", lineNumber);
+                return 101;
+            }
             rs = getRegisterNumber(splitAtComma[0]);
-            immed = 0;
+            immed = (short)atoi(splitAtComma[1]);
             rt = getRegisterNumber(splitAtComma[2]);
             appendToInstructions(&instructionImage, makeI(opCode, rs, rt, immed), &IC);
         }
@@ -489,18 +630,34 @@ unsigned char writeInstruction(char** splitAtComma, int opCode, int type, int fu
     return 0;
 }
 
-unsigned char addExtern(char* name) {
+unsigned char addExtern(Symboltable** table, char* labelname, int addr) {
     Symboltable* sym;
-    int i;
-    int nameLength = strlen(name);
-    char* trimmedName = (char*)calloc(nameLength-1, sizeof(char));
-    for(i = 0; i < nameLength-1; i++) {
-        trimmedName[i] = name[i];
+    if(labelname[strlen(labelname)-1] == '\n'){
+        char* name;
+        name = (char*)calloc(strlen(labelname)-1, sizeof(char));
+        memcpy(name, labelname, strlen(labelname)-1);
+        labelname = name;
+    }
+    if(labelExists(*table, labelname) && addr == 0) {
+        printf("Error in line %d, label %s already exists\n", lineNumber, labelname);
+        return 1;
     }
     initSymbol(&sym);
-    setName(sym, trimmedName);
-    setAddress(sym, 0);
-    addAttribute(sym, ATTR_EXTERN);
-    appendSymbol(&symboltable, sym);
+    setName(sym, labelname);
+    setAddress(sym, addr);
+    if(addr == 0) {
+        addAttribute(sym, ATTR_EXTERN);
+    }
+    appendSymbol(table, sym);
     return 0;
+}
+
+void addICF() {
+    Symboltable* c = symboltable;
+    while(c != NULL) {
+        if(c->attributes[0] == ATTR_DATA || c->attributes[1] == ATTR_DATA) {
+            c->address += IC;
+        }
+        c = c->next;
+    }
 }

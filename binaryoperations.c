@@ -49,3 +49,8 @@ unsigned char appendToInstructions(int** instructions, int newinstruction, int* 
 	printf("appendToInstructions: Memory allocation failed\n");
 	return 1;
 }
+
+
+int hasReg(int instruction) {
+    return instruction & (1 << 25);
+}
