@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include "commands.h"
 
+/*These functions are used to identify commands, their opcode, type and funct*/
 
 unsigned char getOpcodeFromName(char* name) {
 	if(strcmp("add", name) == 0) {
